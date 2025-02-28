@@ -5,7 +5,6 @@ import fs from "fs";
 
 interface PagesTreePluginOptions {
   outputPath?: string;
-  format?: "json" | "js";
 }
 
 export function withPagesTree(
@@ -43,17 +42,14 @@ export function withPagesTree(
 class PagesTreeWebpackPlugin {
   private dir: string;
   private outputPath: string;
-  private format: "json" | "js";
 
   constructor(options: {
     dir: string;
     config: NextConfig;
     outputPath?: string;
-    format?: "json" | "js";
   }) {
     this.dir = options.dir;
     this.outputPath = options.outputPath || ".next/static/pages-tree";
-    this.format = options.format || "json";
   }
 
   apply(compiler: any) {
@@ -69,8 +65,7 @@ class PagesTreeWebpackPlugin {
 
         // Only proceed if we found routes
         if (routes.appRoutes.length > 0) {
-          await this.writeRoutes(routes);
-          await this.generateApiRoute(routes);
+          await this.writeHTMLFile(routes);
           console.log("✅ Pages Tree: Generated routes successfully");
         } else {
           console.warn("⚠️ Pages Tree: No routes found in manifests");
@@ -97,14 +92,12 @@ class PagesTreeWebpackPlugin {
         console.log("📖 Pages Tree: Reading app routes manifest");
         const content = fs.readFileSync(appRoutesManifestPath, "utf8");
         const appRoutesManifest = JSON.parse(content);
-        const data = Object.keys(appRoutesManifest)
-          .filter((route) => !route.startsWith("/api/"))
-          .filter((route) => !route.startsWith("/pages-tree"));
-        routes.appRoutes = data;
-
-        console.log(
-          `📝 Pages Tree: Found ${routes.appRoutes.length} API routes`
+        const data = Object.keys(appRoutesManifest).filter(
+          (route) => !route.startsWith("/api/")
         );
+        routes.appRoutes = data.sort();
+
+        console.log(`📝 Pages Tree: Found ${routes.appRoutes.length} routes`);
       }
     } catch (error) {
       console.error("❌ Pages Tree: Error reading manifests:", error);
@@ -113,71 +106,115 @@ class PagesTreeWebpackPlugin {
     return routes;
   }
 
-  private async writeRoutes(routes: any) {
+  private async writeHTMLFile(routes: { appRoutes: string[] }) {
     try {
-      const outputDir = path.join(this.dir, this.outputPath);
+      // Write to the static directory so it's accessible via /_next/static/
+      const staticDir = path.join(this.dir, ".next", "static");
+      const outputDir = path.join(staticDir, "pages-tree");
       fs.mkdirSync(outputDir, { recursive: true });
 
-      const outputPath = path.join(outputDir, `routes.${this.format}`);
+      const outputPath = path.join(outputDir, "index.html");
 
-      if (this.format === "json") {
-        fs.writeFileSync(outputPath, JSON.stringify(routes, null, 2));
-      } else {
-        const content = `
-          export const routes = ${JSON.stringify(routes, null, 2)};
-          export default routes;
-        `;
-        fs.writeFileSync(outputPath, content);
-      }
-
-      console.log(`💾 Pages Tree: Wrote routes to ${outputPath}`);
-    } catch (error) {
-      console.error("❌ Pages Tree: Error writing routes:", error);
-    }
-  }
-
-  private async generateApiRoute(routes: any) {
-    try {
-      const apiDir = path.join(this.dir, "app", "pages-tree");
-      fs.mkdirSync(apiDir, { recursive: true });
-
-      const apiContent = `
-  import { promises as fs } from 'fs';
-  import path from 'path';
-  
-  export const dynamic = 'force-dynamic';
-  
-  export async function GET() {
-    try {
-      const routesPath = path.join(process.cwd(), '${this.outputPath}/routes.${
-        this.format
-      }');
-      
-      if (await fs.stat(routesPath).catch(() => false)) {
-        ${
-          this.format === "json"
-            ? 'const routes = JSON.parse(await fs.readFile(routesPath, "utf8"));'
-            : "const { default: routes } = await import(routesPath);"
+      // Generate HTML content
+      const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pages Tree</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+            background: #f5f5f5;
         }
-        
-        return Response.json(routes);
-      }
-      
-      return Response.json({
-        appRoutes: []
-      });
-    } catch (error) {
-      console.error('Pages Tree API Error:', error);
-      return Response.json({ error: 'Failed to read routes' }, { status: 500 });
-    }
-  }
-  `;
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            border-bottom: 2px solid #eaeaea;
+            padding-bottom: 0.5rem;
+        }
+        .routes {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .route {
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
+        .route:hover {
+            background: #e9ecef;
+        }
+        .route a {
+            color: #007bff;
+            text-decoration: none;
+            display: block;
+        }
+        .route a:hover {
+            color: #0056b3;
+        }
+        .info {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #eaeaea;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .count {
+            background: #007bff;
+            color: white;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Pages Tree <span class="count">${
+          routes.appRoutes.length
+        }</span></h1>
+        <ul class="routes">
+            ${routes.appRoutes
+              .map(
+                (route) => `
+                <li class="route">
+                    <a href="${route}" target="_blank">${route}</a>
+                </li>`
+              )
+              .join("")}
+        </ul>
+        <div class="info">
+            Generated on ${new Date().toLocaleString()}
+        </div>
+    </div>
+</body>
+</html>
+      `;
 
-      const apiPath = path.join(apiDir, "route.ts");
-      fs.writeFileSync(apiPath, apiContent);
-      console.log(`📝 Pages Tree: Generated API route at ${apiPath}`);
+      fs.writeFileSync(outputPath, html);
+
+      console.log(`💾 Pages Tree: Wrote HTML to ${outputPath}`);
+      console.log(
+        `🌍 Access your routes at: /_next/static/pages-tree/index.html`
+      );
     } catch (error) {
-      console.error("❌ Pages Tree: Error generating API route:", error);
+      console.error("❌ Pages Tree: Error writing HTML file:", error);
     }
   }
 }
