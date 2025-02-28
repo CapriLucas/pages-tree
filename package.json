@@ -1,0 +1,29 @@
+{
+  "name": "pages-tree",
+  "version": "0.1.0",
+  "description": "A Next.js plugin that generates a list of all pages during build",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "next.js",
+    "plugin",
+    "pages",
+    "routes"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "next": "^15.2.0"
+  }
+}
