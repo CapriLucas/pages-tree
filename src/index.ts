@@ -14,12 +14,8 @@ export function withPagesTree(
     return {
       ...nextConfig,
       webpack(config: any, options: WebpackConfigContext) {
-        // Ensure we run only on server builds
-        if (!options.isServer) {
-          return config;
-        }
+        if (!options.isServer) return config;
 
-        // Add our custom plugin to generate routes at build time
         config.plugins.push(
           new PagesTreeWebpackPlugin({
             dir: options.dir,
@@ -28,7 +24,6 @@ export function withPagesTree(
           })
         );
 
-        // Call the original webpack config if it exists
         if (typeof nextConfig.webpack === "function") {
           return nextConfig.webpack(config, options);
         }
@@ -53,20 +48,17 @@ class PagesTreeWebpackPlugin {
   }
 
   apply(compiler: any) {
-    // This ensures we run after Next.js has finished everything
     compiler.hooks.done.tapPromise("PagesTreePlugin", async () => {
       try {
-        // Add a small delay to ensure all files are written
         await new Promise((resolve) => setTimeout(resolve, 1000));
 
         const nextDir = path.join(this.dir, ".next");
-
         const routes = await this.collectRoutes(nextDir);
 
-        // Only proceed if we found routes
         if (routes.appRoutes.length > 0) {
           await this.writeHTMLFile(routes);
-          console.log("✅ Pages Tree: Generated routes successfully");
+          await this.writeJSONFile(routes);
+          console.log("✅ Pages Tree: Generated files successfully");
         } else {
           console.warn("⚠️ Pages Tree: No routes found in manifests");
         }
@@ -74,6 +66,14 @@ class PagesTreeWebpackPlugin {
         console.error("❌ Pages Tree Error:", error);
       }
     });
+  }
+
+  private cleanRoutePath(route: string): string {
+    // Special case for root route
+    if (route === "/page") return "/";
+
+    // Remove /page and /route from the end of the path
+    return route.replace(/\/(page|route)$/, "");
   }
 
   private async collectRoutes(nextDir: string) {
@@ -92,10 +92,12 @@ class PagesTreeWebpackPlugin {
         console.log("📖 Pages Tree: Reading app routes manifest");
         const content = fs.readFileSync(appRoutesManifestPath, "utf8");
         const appRoutesManifest = JSON.parse(content);
-        const data = Object.keys(appRoutesManifest).filter(
-          (route) => !route.startsWith("/api/")
-        );
-        routes.appRoutes = data.sort();
+        const data = Object.keys(appRoutesManifest)
+          .filter((route) => !route.startsWith("/api/"))
+          .map((route) => this.cleanRoutePath(route))
+          .sort();
+
+        routes.appRoutes = data;
 
         console.log(`📝 Pages Tree: Found ${routes.appRoutes.length} routes`);
       }
@@ -106,9 +108,26 @@ class PagesTreeWebpackPlugin {
     return routes;
   }
 
+  private async writeJSONFile(routes: { appRoutes: string[] }) {
+    try {
+      const staticDir = path.join(this.dir, ".next", "static");
+      const outputDir = path.join(staticDir, "pages-tree");
+      fs.mkdirSync(outputDir, { recursive: true });
+
+      const outputPath = path.join(outputDir, "routes.json");
+      fs.writeFileSync(outputPath, JSON.stringify(routes, null, 2));
+
+      console.log(`💾 Pages Tree: Wrote JSON to ${outputPath}`);
+      console.log(
+        `🌍 Access your routes JSON at: /_next/static/pages-tree/routes.json`
+      );
+    } catch (error) {
+      console.error("❌ Pages Tree: Error writing JSON file:", error);
+    }
+  }
+
   private async writeHTMLFile(routes: { appRoutes: string[] }) {
     try {
-      // Write to the static directory so it's accessible via /_next/static/
       const staticDir = path.join(this.dir, ".next", "static");
       const outputDir = path.join(staticDir, "pages-tree");
       fs.mkdirSync(outputDir, { recursive: true });
@@ -182,6 +201,18 @@ class PagesTreeWebpackPlugin {
             font-size: 0.8rem;
             margin-left: 0.5rem;
         }
+        .json-link {
+            margin-top: 1rem;
+            text-align: right;
+        }
+        .json-link a {
+            color: #6c757d;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .json-link a:hover {
+            color: #007bff;
+        }
     </style>
 </head>
 <body>
@@ -201,6 +232,9 @@ class PagesTreeWebpackPlugin {
         </ul>
         <div class="info">
             Generated on ${new Date().toLocaleString()}
+            <div class="json-link">
+                <a href="routes.json" target="_blank">View JSON</a>
+            </div>
         </div>
     </div>
 </body>
