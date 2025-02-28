@@ -57,113 +57,127 @@ class PagesTreeWebpackPlugin {
   }
 
   apply(compiler: any) {
-    // Run after the Next.js manifest generation
-    compiler.hooks.afterEmit.tapPromise("PagesTreePlugin", async () => {
+    // This ensures we run after Next.js has finished everything
+    compiler.hooks.done.tapPromise("PagesTreePlugin", async () => {
       try {
-        // Get the manifests that Next.js generated
-        const appDir = path.join(this.dir, "app");
-        const pagesDir = path.join(this.dir, "pages");
+        // Add a small delay to ensure all files are written
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
         const nextDir = path.join(this.dir, ".next");
 
-        const routes = await this.collectRoutes(appDir, pagesDir, nextDir);
-        await this.writeRoutes(routes);
-        await this.generateApiRoute(routes);
+        const routes = await this.collectRoutes(nextDir);
+
+        // Only proceed if we found routes
+        if (routes.appRoutes.length > 0) {
+          await this.writeRoutes(routes);
+          await this.generateApiRoute(routes);
+          console.log("✅ Pages Tree: Generated routes successfully");
+        } else {
+          console.warn("⚠️ Pages Tree: No routes found in manifests");
+        }
       } catch (error) {
-        console.error("Error in PagesTreePlugin:", error);
+        console.error("❌ Pages Tree Error:", error);
       }
     });
   }
 
-  private async collectRoutes(
-    appDir: string,
-    pagesDir: string,
-    nextDir: string
-  ) {
+  private async collectRoutes(nextDir: string) {
     const routes = {
-      pages: [] as string[],
-      appPages: [] as string[],
       appRoutes: [] as string[],
     };
 
     try {
-      // Try to read Next.js manifests
-      const appPathsManifestPath = path.join(
-        nextDir,
-        "app-path-routes-manifest.json"
-      );
+      console.log("📁 Pages Tree: Checking manifest...");
       const appRoutesManifestPath = path.join(
         nextDir,
-        "app-build-manifest.json"
+        "server/app-paths-manifest.json"
       );
-      const pagesManifestPath = path.join(
-        nextDir,
-        "server/pages-manifest.json"
-      );
-
-      if (fs.existsSync(appPathsManifestPath)) {
-        console.debug("PINt 1");
-
-        const appPathsManifest = require(appPathsManifestPath);
-        routes.appPages = Object.keys(appPathsManifest);
-      }
 
       if (fs.existsSync(appRoutesManifestPath)) {
-        console.debug("PINt 2");
+        console.log("📖 Pages Tree: Reading app routes manifest");
+        const content = fs.readFileSync(appRoutesManifestPath, "utf8");
+        const appRoutesManifest = JSON.parse(content);
+        const data = Object.keys(appRoutesManifest)
+          .filter((route) => !route.startsWith("/api/"))
+          .filter((route) => !route.startsWith("/pages-tree"));
+        routes.appRoutes = data;
 
-        const appRoutesManifest = require(appRoutesManifestPath);
-        // Filter for API routes
-        routes.appRoutes = Object.keys(appRoutesManifest).filter((route) =>
-          route.startsWith("/api/")
+        console.log(
+          `📝 Pages Tree: Found ${routes.appRoutes.length} API routes`
         );
       }
-
-      if (fs.existsSync(pagesManifestPath)) {
-        const pagesManifest = require(pagesManifestPath);
-        routes.pages = Object.keys(pagesManifest);
-      }
-      console.log("Routes", routes);
     } catch (error) {
-      console.warn("Error reading Next.js manifests:", error);
+      console.error("❌ Pages Tree: Error reading manifests:", error);
     }
 
     return routes;
   }
 
   private async writeRoutes(routes: any) {
-    const outputDir = path.join(this.dir, this.outputPath);
-    fs.mkdirSync(outputDir, { recursive: true });
+    try {
+      const outputDir = path.join(this.dir, this.outputPath);
+      fs.mkdirSync(outputDir, { recursive: true });
 
-    if (this.format === "json") {
-      fs.writeFileSync(
-        path.join(outputDir, "routes.json"),
-        JSON.stringify(routes, null, 2)
-      );
-    } else {
-      const content = `
-        export const routes = ${JSON.stringify(routes, null, 2)}
-        export default routes
-      `;
-      fs.writeFileSync(path.join(outputDir, "routes.js"), content);
+      const outputPath = path.join(outputDir, `routes.${this.format}`);
+
+      if (this.format === "json") {
+        fs.writeFileSync(outputPath, JSON.stringify(routes, null, 2));
+      } else {
+        const content = `
+          export const routes = ${JSON.stringify(routes, null, 2)};
+          export default routes;
+        `;
+        fs.writeFileSync(outputPath, content);
+      }
+
+      console.log(`💾 Pages Tree: Wrote routes to ${outputPath}`);
+    } catch (error) {
+      console.error("❌ Pages Tree: Error writing routes:", error);
     }
   }
 
   private async generateApiRoute(routes: any) {
-    const apiDir = path.join(this.dir, "app", "pages-tree");
-    fs.mkdirSync(apiDir, { recursive: true });
+    try {
+      const apiDir = path.join(this.dir, "app", "pages-tree");
+      fs.mkdirSync(apiDir, { recursive: true });
 
-    const apiContent = `
-      export async function GET() {
-        const routes = ${JSON.stringify(routes, null, 2)}
+      const apiContent = `
+  import { promises as fs } from 'fs';
+  import path from 'path';
+  
+  export const dynamic = 'force-dynamic';
+  
+  export async function GET() {
+    try {
+      const routesPath = path.join(process.cwd(), '${this.outputPath}/routes.${
+        this.format
+      }');
+      
+      if (await fs.stat(routesPath).catch(() => false)) {
+        ${
+          this.format === "json"
+            ? 'const routes = JSON.parse(await fs.readFile(routesPath, "utf8"));'
+            : "const { default: routes } = await import(routesPath);"
+        }
         
-        return new Response(JSON.stringify(routes), {
-          headers: {
-            'content-type': 'application/json',
-            'cache-control': 'public, s-maxage=3600'
-          }
-        })
+        return Response.json(routes);
       }
-    `;
+      
+      return Response.json({
+        appRoutes: []
+      });
+    } catch (error) {
+      console.error('Pages Tree API Error:', error);
+      return Response.json({ error: 'Failed to read routes' }, { status: 500 });
+    }
+  }
+  `;
 
-    fs.writeFileSync(path.join(apiDir, "route.ts"), apiContent);
+      const apiPath = path.join(apiDir, "route.ts");
+      fs.writeFileSync(apiPath, apiContent);
+      console.log(`📝 Pages Tree: Generated API route at ${apiPath}`);
+    } catch (error) {
+      console.error("❌ Pages Tree: Error generating API route:", error);
+    }
   }
 }
