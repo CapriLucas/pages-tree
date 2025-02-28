@@ -17,8 +17,16 @@
     "pages",
     "routes"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Lucas Capriata",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CapriLucas/pages-tree.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CapriLucas/pages-tree/issues"
+  },
+  "homepage": "https://github.com/CapriLucas/pages-tree#readme",
   "devDependencies": {
     "@types/node": "^22.13.5",
     "typescript": "^5.7.3"
